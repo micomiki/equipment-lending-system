@@ -1,19 +1,19 @@
 # Equipment Lending
 
 A small Python project implementing the Equipment Lending assignment with:
-- A command-line interface matching the sample commands.
-- A persistent SQLite database (`lending.db`).
+- Python Programming language
+- A SQLite database.
+- Without graphical user interface.
 - A REST API documented automatically by FastAPI.
-- Date validation and prevention of overlapping active loans.
 
 ## 1. Requirements
 
-- Python 3.10 or newer
+- Python 3.10 or high
 - pip
 
 ## 2. Install
 
-Create and activate a virtual environment (recommended).
+Create and activate a virtual environment.
 
 Windows:
 ```powershell
@@ -110,9 +110,9 @@ Update a loan:
 ## 6. Business rules
 
 1. Equipment names cannot be empty.
-2. Dates must be valid ISO dates, and the end date cannot precede the start date.
+2. Dates must be valid ISO dates, and the end date cannot Before the start date.
 3. An equipment item cannot have two active loans with overlapping dates.
-4. Cancelled loans remain in the database for history and do not block availability.
+4. Cancelled loans remain in the database for history until the Equipment exists and do not block availability.
 5. Equipment with active loans cannot be deleted.
 6. Equipment search excludes any item whose active loan overlaps the requested date range.
 
