@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Equipment lending CLI and REST API.
 
-CLI examples:
-  python lending.py equipment add --name "Laptop" --description "Dell laptop"
-  python lending.py loan create --equipment 1 --from 2026-11-01 --to 2026-11-05
-  python lending.py equipment search --from 2026-11-01 --to 2026-11-05
-
-Run the REST API:
-  uvicorn lending:app --reload
-  Open http://127.0.0.1:8000/docs
-"""
 import argparse
 import os
 import sqlite3

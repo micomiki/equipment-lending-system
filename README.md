@@ -115,4 +115,3 @@ Update a loan:
 4. Cancelled loans remain in the database for history until the Equipment exists and do not block availability.
 5. Equipment with active loans cannot be deleted.
 6. Equipment search excludes any item whose active loan overlaps the requested date range.
-
