@@ -36,6 +36,7 @@ python lending.py --help
 python lending.py equipment --help
 python lending.py loan --help
 
+***Equipment Commands***
 python lending.py equipment list
 python lending.py equipment add --name "Laptop" --description "Dell Laptop"
 python lending.py equipment add --name "Projector" --description "HDMI Projector"
@@ -45,12 +46,19 @@ python lending.py equipment update 1 --name "HP Laptop" --description "16 GB RAM
 python lending.py equipment remove 2
 python lending.py equipment search --from 2026-11-01 --to 2026-11-05
 
+The numbers are equipment IDs. Use equipment list to find the correct IDs.
+
+
+***Loan Commands***
 python lending.py loan list
 python lending.py loan create --equipment 1 --from 2026-11-01 --to 2026-11-05
 python lending.py loan change 1 --from 2026-11-02
 python lending.py loan change 1 --to 2026-11-06
 python lending.py loan change 1 --from 2026-11-02 --to 2026-11-06
 python lending.py loan cancel 1
+
+
+The number after loan change or loan cancel is the loan ID, not the equipment ID.
 
 ```
 
