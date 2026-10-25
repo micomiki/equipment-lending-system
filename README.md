@@ -36,23 +36,27 @@ python lending.py --help
 python lending.py equipment --help
 python lending.py loan --help
 
-python lending.py equipment add --name "Laptop" --description "Dell laptop"
-python lending.py equipment add --name "Projector" --description "HDMI projector"
 python lending.py equipment list
-
-python lending.py loan create --equipment 1 --from 2026-11-01 --to 2026-11-05
-python lending.py loan list
-python lending.py equipment search --from 2026-11-03 --to 2026-11-04
-
-python lending.py loan change 1 --to 2026-11-06
-python lending.py loan cancel 1
-python lending.py equipment update 1 --description "Dell laptop, 16 GB RAM"
+python lending.py equipment add --name "Laptop" --description "Dell Laptop"
+python lending.py equipment add --name "Projector" --description "HDMI Projector"
+python lending.py equipment update 1 --name "HP Laptop"
+python lending.py equipment update 1 --description "HP Laptop, 16 GB RAM"
+python lending.py equipment update 1 --name "HP Laptop" --description "16 GB RAM"
 python lending.py equipment remove 2
+python lending.py equipment search --from 2026-11-01 --to 2026-11-05
+
+python lending.py loan list
+python lending.py loan create --equipment 1 --from 2026-11-01 --to 2026-11-05
+python lending.py loan change 1 --from 2026-11-02
+python lending.py loan change 1 --to 2026-11-06
+python lending.py loan change 1 --from 2026-11-02 --to 2026-11-06
+python lending.py loan cancel 1
+
 ```
 
-Dates must use `YYYY-MM-DD`. Loan dates are inclusive: a loan from November 1 through November 5 conflicts with another loan that includes November 5.
+Dates must use `YYYY-MM-DD`. 
 
-The database is created automatically as `lending.db` in the current working directory. To use another location, set `LENDING_DB` before running the app.
+The database is created automatically as `lending.db` in the current working directory. 
 
 ## 4. Start the REST API
 
@@ -104,24 +108,3 @@ Update a loan:
 5. Equipment with active loans cannot be deleted.
 6. Equipment search excludes any item whose active loan overlaps the requested date range.
 
-## 7. Domain concept map
-
-```text
-Equipment
-- id
-- name
-- description
-     1
-     |
-     | has
-     |
-     0..*
-Loan
-- id
-- equipment_id
-- start_date
-- end_date
-- status
-```
-
-One equipment item can have many loans over time. Each loan belongs to one equipment item.
