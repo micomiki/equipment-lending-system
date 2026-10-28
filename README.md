@@ -5,11 +5,18 @@ A small Python project implementing the Equipment Lending assignment with:
 - A SQLite database.
 - Without graphical user interface.
 - A REST API documented automatically by FastAPI.
+- Docker support for containerized deployment
 
 ## 1. Requirements
 
-- Python 3.10 or high
-- pip
+For local installation:
+
+- Python 3.10 or newer
+- `pip`
+
+For Docker deployment:
+
+- Docker Desktop installed and running
 
 ## 2. Install
 
