@@ -7,6 +7,10 @@ A small Python project implementing the Equipment Lending assignment with:
 - A REST API documented automatically by FastAPI.
 - Docker support for containerized deployment
 
+## Domain Concept Map
+
+![Equipment Lending System Domain Concept Map](images/Equipment_Lending.jpg)
+
 ## 1. Requirements
 
 For local installation:
