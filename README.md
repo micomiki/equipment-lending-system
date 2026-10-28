@@ -115,3 +115,109 @@ Update a loan:
 4. Cancelled loans remain in the database for history until the Equipment exists and do not block availability.
 5. Equipment with active loans cannot be deleted.
 6. Equipment search excludes any item whose active loan overlaps the requested date range.
+
+
+## 8. Running with Docker
+
+Docker lets run the Equipment Lending System in a container without installing the project's Python dependencies directly on the computer.
+
+### Step 1: Build the Docker image
+
+Make sure Docker Desktop is running. Open a terminal in the project directory containing the `Dockerfile` and run:
+
+```bash
+docker build -t equipment-lending .
+```
+
+### Step 2: Create a persistent database volume
+
+Create a Docker volume to store the SQLite database:
+
+```bash
+docker volume create equipment-lending-data
+```
+
+The volume preserves database data independently of the container's lifecycle.
+
+### Step 3: Run the application
+
+```bash
+docker run -d --name equipment-lending -p 8000:8000 -v equipment-lending-data:/data equipment-lending
+```
+
+This command:
+
+- Runs the application in the background.
+- Maps port `8000` on the computer to port `8000` in the container.
+- Mounts the persistent volume at `/data`.
+- Uses `/data/lending.db` for the SQLite database inside the container.
+
+### Step 4: Access the API
+
+Open the interactive API documentation:
+
+<http://localhost:8000/docs>
+
+### Step 5: Test the CLI inside Docker
+
+List equipment:
+
+```bash
+docker exec -it equipment-lending python lending.py equipment list
+```
+
+List loans:
+
+```bash
+docker exec -it equipment-lending python lending.py loan list
+```
+
+Add equipment:
+
+```bash
+docker exec -it equipment-lending python lending.py equipment add --name "Laptop" --description "Test laptop"
+```
+
+### Step 6: Manage the container
+
+Check running containers:
+
+```bash
+docker ps
+```
+
+View application logs:
+
+```bash
+docker logs equipment-lending
+```
+
+Stop the container:
+
+```bash
+docker stop equipment-lending
+```
+
+Start the existing container again:
+
+```bash
+docker start equipment-lending
+```
+
+### Step 7: Update the Docker image after code changes
+
+Rebuild the image:
+
+```bash
+docker build -t equipment-lending .
+```
+
+The existing container will not automatically switch to the newly built image. Stop and remove the old container, then create a new one:
+
+```bash
+docker stop equipment-lending
+docker rm equipment-lending
+docker run -d --name equipment-lending -p 8000:8000 -v equipment-lending-data:/data equipment-lending
+```
+
+The command reuses the existing `equipment-lending-data` volume, preserving its database data. Removing a container does not remove the named volume. Do not remove the volume if we need to keep its data.
