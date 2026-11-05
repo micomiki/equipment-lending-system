@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# SQLite local data and journals
+lending.db
+lending.db-journal
+lending.db-wal
+lending.db-shm
+
+# Environment and editor files
+.env
+.vscode/
+.idea/

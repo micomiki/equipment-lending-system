@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Availability · Equipment Lending{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">SEARCH</p><h1>Equipment availability</h1><p class="subtitle">Find equipment that has no active loan overlapping your selected dates.</p></div></div>
+<section class="form-panel">
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <form method="get" action="/ui/availability" class="form-grid">
+    <div class="two-col">
+      <label>Start date <span class="required">*</span><input type="date" name="start_date" required value="{{ start_date }}"></label>
+      <label>End date <span class="required">*</span><input type="date" name="end_date" required value="{{ end_date }}"></label>
+    </div>
+    <div class="form-actions"><a class="button secondary" href="/ui/availability">Clear</a><button class="button primary" type="submit">Search availability</button></div>
+  </form>
+</section>
+{% if available_items is not none %}
+<section class="panel results-panel">
+  <div class="section-heading"><div><p class="eyebrow">SEARCH RESULTS</p><h2>{{ available_items|length }} available item(s)</h2><p class="muted">{{ start_date }} through {{ end_date }}</p></div></div>
+  {% if available_items %}
+  <div class="table-wrap"><table><thead><tr><th>ID</th><th>Equipment</th><th>Description</th><th class="right">Action</th></tr></thead><tbody>
+  {% for item in available_items %}<tr><td>#{{ item.id }}</td><td><strong>{{ item.name }}</strong></td><td>{{ item.description or "—" }}</td><td class="right"><a class="button small primary" href="/ui/loans/new">Create loan</a></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="empty">No equipment is available for this date range.</p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}
