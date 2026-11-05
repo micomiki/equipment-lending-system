@@ -257,43 +257,8 @@ docker compose down -v
 
 Do not use `-v` when you want to preserve loan and equipment records.
 
-## 10. Verify from a fresh checkout
 
-Clone the repository:
-
-```bash
-git clone https://github.com/micomiki/equipment-lending-system.git
-cd equipment-lending-system
-```
-
-Run locally:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
-uvicorn lending:app --reload
-```
-
-Then open http://127.0.0.1:8000/.
-
-Or run the Docker Compose workflow:
-
-```bash
-docker compose up --build -d
-docker compose ps
-```
-
-Open http://localhost:8000/ and test adding equipment, creating a loan, changing/cancelling a loan, and searching availability.
-
-Stop the application with:
-
-```bash
-docker compose down
-```
-
-## 11. Database
+## 10. Database
 
 The SQLite database is created automatically. By default, local development stores it as `lending.db` in the current working directory.
 
