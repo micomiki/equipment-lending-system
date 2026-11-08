@@ -15,13 +15,14 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager, contextmanager
 from datetime import date
+from pathlib import Path
+from urllib.parse import urlencode
+
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pathlib import Path
-from urllib.parse import urlencode
+from pydantic import BaseModel, Field
 
 DB_PATH = os.environ.get("LENDING_DB", "lending.db")
 @asynccontextmanager
@@ -226,7 +227,6 @@ def api_update_equipment(equipment_id: int, item: EquipmentUpdate):
 @app.delete("/equipment/{equipment_id}", status_code=204)
 def api_remove_equipment(equipment_id: int):
     api_call(remove_equipment, equipment_id)
-    return None
 
 @app.get("/loans")
 def api_list_loans():
