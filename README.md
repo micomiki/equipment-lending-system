@@ -265,3 +265,8 @@ The SQLite database is created automatically. By default, local development stor
 Set `LENDING_DB` to use another database path. Docker Compose sets it to `/data/lending.db` and mounts the named `equipment-lending-data` volume at `/data`.
 
 Local SQLite database files, journal files, Python virtual environments, and test caches are excluded through `.gitignore` and `.dockerignore`.
+## Continuous Integration
+
+This project uses GitLab CI/CD to automatically run unit tests,
+Ruff code-quality checks, and Docker image builds for pushes
+and merge requests.
