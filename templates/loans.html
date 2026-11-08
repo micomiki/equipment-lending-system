@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Loans · Equipment Lending{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">LENDING</p><h1>Loans</h1><p class="subtitle">Create, update and cancel equipment loans.</p></div><a class="button primary" href="/ui/loans/new">＋ Create a loan</a></div>
+<section class="panel">
+{% if loan_items %}
+<div class="table-wrap"><table><thead><tr><th>Loan ID</th><th>Equipment</th><th>Start date</th><th>End date</th><th>Status</th><th class="right">Actions</th></tr></thead><tbody>
+{% for loan in loan_items %}
+<tr><td>#{{ loan.id }}</td><td><strong>{{ loan.equipment_name }}</strong></td><td>{{ loan.start_date }}</td><td>{{ loan.end_date }}</td><td><span class="badge {{ loan.status }}">{{ loan.status }}</span></td><td class="right actions-cell">
+{% if loan.status == 'active' %}
+<a class="button small secondary" href="/ui/loans/{{ loan.id }}/edit">Change dates</a>
+<form method="post" action="/ui/loans/{{ loan.id }}/cancel" onsubmit="return confirm('Cancel this loan?')"><button class="button small danger" type="submit">Cancel</button></form>
+{% else %}<span class="muted">No actions</span>{% endif %}
+</td></tr>
+{% endfor %}
+</tbody></table></div>
+{% else %}<div class="empty-state"><h3>No loans yet</h3><p>Create a loan to reserve an equipment item for a date range.</p><a class="button primary" href="/ui/loans/new">Create a loan</a></div>{% endif %}
+</section>
+{% endblock %}

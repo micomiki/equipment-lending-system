@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Equipment Lending{% endblock %}</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Equipment<span>Lending</span></a>
+    <nav>
+      <a href="/">Dashboard</a>
+      <a href="/ui/equipment">Equipment</a>
+      <a href="/ui/loans">Loans</a>
+      <a href="/ui/availability">Availability</a>
+      <a href="/docs" target="_blank" rel="noreferrer">API docs ↗</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% if message %}
+      <div class="alert {{ 'error' if level == 'error' else 'success' }}">{{ message }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer>Equipment Lending System · FastAPI + SQLite</footer>
+</body>
+</html>

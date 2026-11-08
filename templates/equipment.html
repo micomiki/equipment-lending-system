@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Equipment · Equipment Lending{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">INVENTORY</p><h1>Equipment</h1><p class="subtitle">Manage the items available for lending.</p></div><a class="button primary" href="/ui/equipment/new">＋ Add equipment</a></div>
+<section class="panel">
+{% if equipment_items %}
+<div class="table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Description</th><th class="right">Actions</th></tr></thead><tbody>
+{% for item in equipment_items %}
+<tr><td>#{{ item.id }}</td><td><strong>{{ item.name }}</strong></td><td>{{ item.description or "—" }}</td><td class="right actions-cell">
+<a class="button small secondary" href="/ui/equipment/{{ item.id }}/edit">Edit</a>
+<form method="post" action="/ui/equipment/{{ item.id }}/delete" onsubmit="return confirm('Remove this equipment item?')"><button class="button small danger" type="submit">Remove</button></form>
+</td></tr>
+{% endfor %}
+</tbody></table></div>
+{% else %}<div class="empty-state"><h3>No equipment yet</h3><p>Add your first item to start creating loans.</p><a class="button primary" href="/ui/equipment/new">Add equipment</a></div>{% endif %}
+</section>
+{% endblock %}

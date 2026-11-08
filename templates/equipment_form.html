@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit equipment" if equipment else "Add equipment" }} · Equipment Lending{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">INVENTORY</p><h1>{{ "Edit equipment" if equipment else "Add equipment" }}</h1><p class="subtitle">Enter the equipment details below.</p></div><a class="button secondary" href="/ui/equipment">← Back to equipment</a></div>
+<section class="form-panel">
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  <form method="post" action="{{ '/ui/equipment/' ~ equipment.id ~ '/update' if equipment else '/ui/equipment' }}" class="form-grid">
+    <label>Equipment name <span class="required">*</span><input type="text" name="name" maxlength="200" required value="{{ values.name or '' }}" placeholder="e.g. Laptop"></label>
+    <label>Description<textarea name="description" rows="4" placeholder="Describe the equipment">{{ values.description or '' }}</textarea></label>
+    <div class="form-actions"><a class="button secondary" href="/ui/equipment">Cancel</a><button class="button primary" type="submit">{{ "Save changes" if equipment else "Add equipment" }}</button></div>
+  </form>
+</section>
+{% endblock %}

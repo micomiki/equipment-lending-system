@@ -1,20 +1,47 @@
 #!/usr/bin/env python3
+"""Equipment lending CLI and REST API.
 
+CLI examples:
+  python lending.py equipment add --name "Laptop" --description "Dell laptop"
+  python lending.py loan create --equipment 1 --from 2026-11-01 --to 2026-11-05
+  python lending.py equipment search --from 2026-11-01 --to 2026-11-05
+
+Run the REST API:
+  uvicorn lending:app --reload
+  Open http://127.0.0.1:8000/docs
+"""
 import argparse
 import os
 import sqlite3
-from contextlib import contextmanager, asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import date
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from pathlib import Path
+from urllib.parse import urlencode
 
 DB_PATH = os.environ.get("LENDING_DB", "lending.db")
-app = FastAPI(title="Equipment Lending API", version="1.0.0",
-              description="Manage equipment and date-based loans. Loans use inclusive dates.")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize the database when the application starts."""
+    init_db()
+    yield
+
+
+app = FastAPI(
+    title="Equipment Lending API",
+    version="1.0.0",
+    description="Manage equipment and date-based loans. Loans use inclusive dates.",
+    lifespan=lifespan,
+)
 
 @contextmanager
 def db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     try:
@@ -96,57 +123,27 @@ def update_equipment(equipment_id, name=None, description=None):
 def remove_equipment(equipment_id):
     if not equipment_exists(equipment_id):
         raise ValueError(f"Equipment {equipment_id} not found.")
-
-    # Check whether the equipment has any active loans.
-    active_loans = rows(
-        "SELECT id FROM loans "
-        "WHERE equipment_id = ? AND status = 'active'",
-        (equipment_id,)
-    )
-
-    if active_loans:
-        raise ValueError(
-            "Cannot remove equipment because it has active loans. "
-            "Cancel all active loans first."
-        )
-
-    # Delete cancelled loan records before deleting the equipment.
+    if rows("SELECT id FROM loans WHERE equipment_id=? AND status='active'", (equipment_id,)):
+        raise ValueError("Cannot remove equipment with active loans. Cancel its loans first.")
     with db() as conn:
-        conn.execute(
-            "DELETE FROM loans "
-            "WHERE equipment_id = ? AND status != 'active'",
-            (equipment_id,)
-        )
+        conn.execute("DELETE FROM equipment WHERE id=?", (equipment_id,))
 
-        conn.execute(
-            "DELETE FROM equipment WHERE id = ?",
-            (equipment_id,)
-        )
 def create_loan(equipment_id, start, end):
     valid_dates(start, end)
-
     if not equipment_exists(equipment_id):
         raise ValueError(f"Equipment {equipment_id} not found.")
-
     if overlap_exists(equipment_id, start, end):
-        raise ValueError(
-            "Loan conflicts with an existing active loan for this equipment."
-        )
-
+        raise ValueError("Loan conflicts with an existing active loan for this equipment.")
     with db() as conn:
         cur = conn.execute(
-            """INSERT INTO loans(equipment_id, start_date, end_date)
-               VALUES (?, ?, ?)""",
-            (equipment_id, start, end)
+            """INSERT INTO loans(equipment_id,start_date,end_date)
+               VALUES (?,?,?)""",
+            (equipment_id, start, end),
         )
-
-        loan = conn.execute(
-            "SELECT * FROM loans WHERE id = ?",
-            (cur.lastrowid,)
+        created = conn.execute(
+            "SELECT * FROM loans WHERE id=?", (cur.lastrowid,)
         ).fetchone()
-
-        return dict(loan)
-
+        return dict(created)
 
 def change_loan(loan_id, start=None, end=None):
     found = rows("SELECT * FROM loans WHERE id=?", (loan_id,))
@@ -199,18 +196,6 @@ class LoanUpdate(BaseModel):
     start_date: str | None = None
     end_date: str | None = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
-
-app = FastAPI(
-    title="Equipment Lending API",
-    version="1.0.0",
-    description="Manage equipment and date-based loans. Loans use inclusive dates.",
-    lifespan=lifespan
-)
-
 def api_call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -219,9 +204,12 @@ def api_call(fn, *args, **kwargs):
         status = 404 if "not found" in message.lower() else 409 if ("conflict" in message.lower() or "active loans" in message.lower() or "cancelled" in message.lower()) else 400
         raise HTTPException(status_code=status, detail=message)
 
-@app.get("/")
-def root():
-    return {"message": "Equipment Lending API", "docs": "/docs"}
+# The browser-based application is available at /.
+# The JSON API remains available through the resource endpoints (/equipment, /loans).
+@app.get("/api", tags=["system"])
+def api_root():
+    """Return API information."""
+    return {"message": "Equipment Lending API", "docs": "/docs", "web_app": "/"}
 
 @app.get("/equipment")
 def api_list_equipment():
@@ -262,6 +250,348 @@ def api_cancel_loan(loan_id: int):
 def api_search_equipment(start_date: str, end_date: str):
     return api_call(search_equipment, start_date, end_date)
 
+
+
+# ---------------------------------------------------------------------------
+# Browser-based web application (HTML forms)
+# ---------------------------------------------------------------------------
+
+PROJECT_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(PROJECT_DIR / "templates"))
+app.mount(
+    "/static",
+    StaticFiles(directory=str(PROJECT_DIR / "static")),
+    name="static",
+)
+
+
+def _ui_redirect(path: str, message: str, level: str = "success"):
+    """Redirect after a successful or failed form submission."""
+    separator = "&" if "?" in path else "?"
+    query = urlencode({"message": message, "level": level})
+    return RedirectResponse(url=f"{path}{separator}{query}", status_code=303)
+
+
+def _render(request: Request, template: str, context: dict, status_code: int = 200):
+    """Render an HTML page with the common request context."""
+    return templates.TemplateResponse(
+        request=request,
+        name=template,
+        context=context,
+        status_code=status_code,
+    )
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def web_home(
+    request: Request,
+    message: str | None = None,
+    level: str = "success",
+):
+    equipment_items = rows("SELECT * FROM equipment ORDER BY id")
+    loan_items = rows(
+        """SELECT l.*, e.name AS equipment_name
+           FROM loans l JOIN equipment e ON e.id=l.equipment_id
+           ORDER BY l.id DESC"""
+    )
+    active_loans = [loan for loan in loan_items if loan["status"] == "active"]
+    return _render(
+        request,
+        "index.html",
+        {
+            "request": request,
+            "equipment_count": len(equipment_items),
+            "loan_count": len(loan_items),
+            "active_loan_count": len(active_loans),
+            "recent_loans": loan_items[:5],
+            "message": message,
+            "level": level,
+        },
+    )
+
+
+@app.get("/ui/equipment", response_class=HTMLResponse, include_in_schema=False)
+def web_equipment(
+    request: Request,
+    message: str | None = None,
+    level: str = "success",
+):
+    return _render(
+        request,
+        "equipment.html",
+        {
+            "request": request,
+            "equipment_items": rows("SELECT * FROM equipment ORDER BY id"),
+            "message": message,
+            "level": level,
+        },
+    )
+
+
+@app.get(
+    "/ui/equipment/new",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def web_equipment_new(request: Request):
+    return _render(
+        request,
+        "equipment_form.html",
+        {
+            "request": request,
+            "equipment": None,
+            "error": None,
+            "values": {"name": "", "description": ""},
+        },
+    )
+
+
+@app.post("/ui/equipment", include_in_schema=False)
+async def web_equipment_create(request: Request):
+    form = await request.form()
+    name = str(form.get("name", ""))
+    description = str(form.get("description", ""))
+    try:
+        add_equipment(name, description)
+        return _ui_redirect("/ui/equipment", "Equipment added successfully.")
+    except ValueError as exc:
+        return _render(
+            request,
+            "equipment_form.html",
+            {
+                "request": request,
+                "equipment": None,
+                "error": str(exc),
+                "values": {"name": name, "description": description},
+            },
+            status_code=400,
+        )
+
+
+@app.get(
+    "/ui/equipment/{equipment_id}/edit",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def web_equipment_edit(request: Request, equipment_id: int):
+    found = rows("SELECT * FROM equipment WHERE id=?", (equipment_id,))
+    if not found:
+        return _ui_redirect("/ui/equipment", f"Equipment {equipment_id} not found.", "error")
+    return _render(
+        request,
+        "equipment_form.html",
+        {
+            "request": request,
+            "equipment": found[0],
+            "error": None,
+            "values": found[0],
+        },
+    )
+
+
+@app.post("/ui/equipment/{equipment_id}/update", include_in_schema=False)
+async def web_equipment_update(request: Request, equipment_id: int):
+    form = await request.form()
+    name = str(form.get("name", ""))
+    description = str(form.get("description", ""))
+    try:
+        update_equipment(equipment_id, name=name, description=description)
+        return _ui_redirect("/ui/equipment", "Equipment updated successfully.")
+    except ValueError as exc:
+        found = rows("SELECT * FROM equipment WHERE id=?", (equipment_id,))
+        return _render(
+            request,
+            "equipment_form.html",
+            {
+                "request": request,
+                "equipment": found[0] if found else {"id": equipment_id},
+                "error": str(exc),
+                "values": {"name": name, "description": description},
+            },
+            status_code=400,
+        )
+
+
+@app.post("/ui/equipment/{equipment_id}/delete", include_in_schema=False)
+def web_equipment_delete(equipment_id: int):
+    try:
+        remove_equipment(equipment_id)
+        return _ui_redirect("/ui/equipment", "Equipment removed successfully.")
+    except ValueError as exc:
+        return _ui_redirect("/ui/equipment", str(exc), "error")
+
+
+@app.get("/ui/loans", response_class=HTMLResponse, include_in_schema=False)
+def web_loans(
+    request: Request,
+    message: str | None = None,
+    level: str = "success",
+):
+    loan_items = rows(
+        """SELECT l.*, e.name AS equipment_name
+           FROM loans l JOIN equipment e ON e.id=l.equipment_id
+           ORDER BY l.id DESC"""
+    )
+    return _render(
+        request,
+        "loans.html",
+        {
+            "request": request,
+            "loan_items": loan_items,
+            "message": message,
+            "level": level,
+        },
+    )
+
+
+@app.get("/ui/loans/new", response_class=HTMLResponse, include_in_schema=False)
+def web_loan_new(request: Request):
+    return _render(
+        request,
+        "loan_form.html",
+        {
+            "request": request,
+            "loan": None,
+            "equipment_items": rows("SELECT * FROM equipment ORDER BY name"),
+            "error": None,
+            "values": {"equipment_id": "", "start_date": "", "end_date": ""},
+        },
+    )
+
+
+@app.post("/ui/loans", include_in_schema=False)
+async def web_loan_create(request: Request):
+    form = await request.form()
+    equipment_value = str(form.get("equipment_id", ""))
+    start = str(form.get("start_date", ""))
+    end = str(form.get("end_date", ""))
+    values = {
+        "equipment_id": equipment_value,
+        "start_date": start,
+        "end_date": end,
+    }
+    try:
+        equipment_id = int(equipment_value)
+        create_loan(equipment_id, start, end)
+        return _ui_redirect("/ui/loans", "Loan created successfully.")
+    except (ValueError, TypeError) as exc:
+        message = str(exc) or "Select a valid equipment item."
+        return _render(
+            request,
+            "loan_form.html",
+            {
+                "request": request,
+                "loan": None,
+                "equipment_items": rows("SELECT * FROM equipment ORDER BY name"),
+                "error": message,
+                "values": values,
+            },
+            status_code=400,
+        )
+
+
+@app.get(
+    "/ui/loans/{loan_id}/edit",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def web_loan_edit(request: Request, loan_id: int):
+    found = rows(
+        """SELECT l.*, e.name AS equipment_name
+           FROM loans l JOIN equipment e ON e.id=l.equipment_id
+           WHERE l.id=?""",
+        (loan_id,),
+    )
+    if not found:
+        return _ui_redirect("/ui/loans", f"Loan {loan_id} not found.", "error")
+    loan = found[0]
+    return _render(
+        request,
+        "loan_form.html",
+        {
+            "request": request,
+            "loan": loan,
+            "equipment_items": rows("SELECT * FROM equipment ORDER BY name"),
+            "error": None,
+            "values": {
+                "equipment_id": str(loan["equipment_id"]),
+                "start_date": loan["start_date"],
+                "end_date": loan["end_date"],
+            },
+        },
+    )
+
+
+@app.post("/ui/loans/{loan_id}/update", include_in_schema=False)
+async def web_loan_update(request: Request, loan_id: int):
+    form = await request.form()
+    start = str(form.get("start_date", ""))
+    end = str(form.get("end_date", ""))
+    try:
+        change_loan(loan_id, start=start, end=end)
+        return _ui_redirect("/ui/loans", "Loan dates updated successfully.")
+    except ValueError as exc:
+        found = rows(
+            """SELECT l.*, e.name AS equipment_name
+               FROM loans l JOIN equipment e ON e.id=l.equipment_id
+               WHERE l.id=?""",
+            (loan_id,),
+        )
+        return _render(
+            request,
+            "loan_form.html",
+            {
+                "request": request,
+                "loan": found[0] if found else {"id": loan_id},
+                "equipment_items": rows("SELECT * FROM equipment ORDER BY name"),
+                "error": str(exc),
+                "values": {
+                    "equipment_id": str(found[0]["equipment_id"]) if found else "",
+                    "start_date": start,
+                    "end_date": end,
+                },
+            },
+            status_code=400,
+        )
+
+
+@app.post("/ui/loans/{loan_id}/cancel", include_in_schema=False)
+def web_loan_cancel(loan_id: int):
+    try:
+        cancel_loan(loan_id)
+        return _ui_redirect("/ui/loans", "Loan cancelled successfully.")
+    except ValueError as exc:
+        return _ui_redirect("/ui/loans", str(exc), "error")
+
+
+@app.get("/ui/availability", response_class=HTMLResponse, include_in_schema=False)
+def web_availability(
+    request: Request,
+    start_date: str | None = None,
+    end_date: str | None = None,
+):
+    available_items = None
+    error = None
+    if start_date or end_date:
+        try:
+            if not start_date or not end_date:
+                raise ValueError("Enter both a start date and an end date.")
+            available_items = search_equipment(start_date, end_date)
+        except ValueError as exc:
+            error = str(exc)
+    return _render(
+        request,
+        "availability.html",
+        {
+            "request": request,
+            "start_date": start_date or "",
+            "end_date": end_date or "",
+            "available_items": available_items,
+            "error": error,
+        },
+    )
+
+
 def print_items(items):
     if not items:
         print("No records found.")
@@ -270,78 +600,21 @@ def print_items(items):
         print(" | ".join(f"{key}: {value}" for key, value in item.items()))
 
 def build_parser():
-    help_text = """Usage: lending.py COMMAND [OPTIONS]
-
-Commands:
-  equipment list
-  equipment add --name NAME --description TEXT
-  equipment update ID [--name NAME] [--description TEXT]
-  equipment remove ID
-  equipment search --from DATE --to DATE
-
-  loan list
-  loan create --equipment ID --from DATE --to DATE
-  loan change ID [--from DATE] [--to DATE]
-  loan cancel ID
-
-Options:
-  -h, --help    Show this help message
-
-Examples:
-  python lending.py equipment add --name "Laptop" --description "Dell Laptop"
-  python lending.py equipment list
-  python lending.py loan create --equipment 1 --from 2026-11-01 --to 2026-11-05
-  python lending.py loan list
-  python lending.py equipment search --from 2026-11-01 --to 2026-11-05
-"""
-
-    parser = argparse.ArgumentParser(
-        description="Equipment lending management",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=help_text
-    )
-
+    parser = argparse.ArgumentParser(description="Equipment lending management")
     sub = parser.add_subparsers(dest="entity", required=True)
-
     equipment = sub.add_parser("equipment", help="Manage equipment")
     es = equipment.add_subparsers(dest="action", required=True)
-
-    es.add_parser("list", help="List all equipment")
-
-    p = es.add_parser("add", help="Add equipment")
-    p.add_argument("--name", required=True)
-    p.add_argument("--description", required=True)
-
-    p = es.add_parser("update", help="Update equipment")
-    p.add_argument("id", type=int)
-    p.add_argument("--name")
-    p.add_argument("--description")
-
-    p = es.add_parser("remove", help="Remove equipment")
-    p.add_argument("id", type=int)
-
-    p = es.add_parser("search", help="Search available equipment")
-    p.add_argument("--from", dest="start", required=True)
-    p.add_argument("--to", dest="end", required=True)
-
+    es.add_parser("list")
+    p = es.add_parser("add"); p.add_argument("--name", required=True); p.add_argument("--description", required=True)
+    p = es.add_parser("update"); p.add_argument("id", type=int); p.add_argument("--name"); p.add_argument("--description")
+    p = es.add_parser("remove"); p.add_argument("id", type=int)
+    p = es.add_parser("search"); p.add_argument("--from", dest="start", required=True); p.add_argument("--to", dest="end", required=True)
     loan = sub.add_parser("loan", help="Manage loans")
     ls = loan.add_subparsers(dest="action", required=True)
-
-    ls.add_parser("list", help="List all loans")
-
-    p = ls.add_parser("create", help="Create a loan")
-    p.add_argument("--equipment", type=int, required=True)
-    p.add_argument("--from", dest="start", required=True)
-    p.add_argument("--to", dest="end", required=True)
-
-    p = ls.add_parser("change", help="Change loan dates")
-    p.add_argument("id", type=int)
-    p.add_argument("--from", dest="start")
-    p.add_argument("--to", dest="end")
-
-    p = ls.add_parser("cancel", help="Cancel a loan")
-    p.add_argument("id", type=int)
-
+    ls.add_parser("list")
+    p = ls.add_parser("create"); p.add_argument("--equipment", type=int, required=True); p.add_argument("--from", dest="start", required=True); p.add_argument("--to", dest="end", required=True)
+    p = ls.add_parser("change"); p.add_argument("id", type=int); p.add_argument("--from", dest="start"); p.add_argument("--to", dest="end")
+    p = ls.add_parser("cancel"); p.add_argument("id", type=int)
     return parser
 
 def main():
