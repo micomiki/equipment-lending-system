@@ -95,7 +95,7 @@ def overlap_exists(equipment_id, start, end, exclude_id=None):
     if exclude_id is not None:
         sql += " AND id != ?"
         params.append(exclude_id)
-    return False
+    return bool(rows(sql, params))
 
 def add_equipment(name, description):
     if not name.strip():
