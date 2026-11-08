@@ -6,42 +6,35 @@ stages:
 
 unit_tests:
   stage: test
-  image: python:3.12-slim
+  tags:
+    - windows-local
   script:
-    - python -m pip install -r requirements-dev.txt
-    - python -m pytest -v --junitxml=pytest-report.xml
+    - py -3.13 -m venv .ci-venv
+    - .\.ci-venv\Scripts\python.exe -m pip install -r requirements.txt
+    - .\.ci-venv\Scripts\python.exe -m pip install pytest httpx
+    - .\.ci-venv\Scripts\python.exe -m pytest -v --junitxml=pytest-report.xml
   artifacts:
     when: always
     reports:
       junit: pytest-report.xml
     paths:
       - pytest-report.xml
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 code_quality:
   stage: quality
-  image: python:3.12-slim
+  tags:
+    - windows-local
   script:
-    - python -m pip install ruff
-    - ruff check lending.py tests/ --output-format=concise
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - py -3.13 -m venv .ci-venv
+    - .\.ci-venv\Scripts\python.exe -m pip install ruff
+    - .\.ci-venv\Scripts\python.exe -m ruff check lending.py tests/
+  needs: []
 
 docker_build:
   stage: build
-  image: docker:27-cli
-  services:
-    - name: docker:27-dind
-      alias: docker
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
+  tags:
+    - windows-local 
   script:
     - docker info
-    - docker build -t equipment-lending:$CI_COMMIT_SHORT_SHA .
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - docker build -t equipment-lending:$env:CI_COMMIT_SHORT_SHA .
+  needs: []
