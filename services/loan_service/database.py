@@ -40,6 +40,14 @@ def init_db():
                 CHECK(start_date <= end_date)
             )
         """)
+        conn.execute("""
+           CREATE TABLE IF NOT EXISTS equipment_deletion_guards (
+           equipment_id INTEGER PRIMARY KEY,
+            status TEXT NOT NULL
+            CHECK(status IN ('pending', 'deleted')),
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
 
 def rows(sql, params=()):

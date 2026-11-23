@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 
+from messaging.publisher import publish_event
 from services.equipment_service.database import db, init_db, rows
 from services.equipment_service.models import EquipmentCreate, EquipmentUpdate
 
@@ -66,16 +67,20 @@ def add_equipment(item: EquipmentCreate):
 
     with db() as conn:
         cursor = conn.execute(
-            "INSERT INTO equipment(name, description) VALUES (?, ?)",
-            (item.name.strip(), item.description.strip()),
-        )
+        "INSERT INTO equipment(name, description) VALUES (?, ?)",
+        (item.name.strip(), item.description.strip()),
+          )
 
-        result = conn.execute(
-            "SELECT * FROM equipment WHERE id=?",
+        result = dict(
+        conn.execute(
+            "SELECT id, name, description FROM equipment WHERE id=?",
             (cursor.lastrowid,),
         ).fetchone()
+      )
+        
+    publish_event("equipment.created", result)
 
-        return dict(result)
+    return result
 
 
 @app.patch("/equipment/{equipment_id}")
@@ -105,4 +110,6 @@ def update_equipment(equipment_id: int, item: EquipmentUpdate):
             (name.strip(), description.strip(), equipment_id),
         )
 
-    return get_equipment(equipment_id)
+    updated = get_equipment(equipment_id)
+    publish_event("equipment.updated", updated)
+    return updated

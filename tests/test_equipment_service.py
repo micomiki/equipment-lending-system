@@ -89,3 +89,12 @@ def test_reject_empty_equipment_name(client):
     )
 
     assert response.status_code == 422
+@pytest.fixture(autouse=True)
+def mock_rabbitmq(monkeypatch):
+    from services.equipment_service import main
+
+    monkeypatch.setattr(
+        main,
+        "publish_event",
+        lambda event_type, equipment: None,
+    )

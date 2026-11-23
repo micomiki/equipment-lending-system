@@ -81,33 +81,55 @@ def get_loan(loan_id: int):
     return result[0]
 
 
+
 @app.post("/loans", status_code=201)
 def create_loan(item: LoanCreate):
     valid_dates(item.start_date, item.end_date)
 
-    try:
-        equipment = get_equipment(item.equipment_id)
-    except httpx.RequestError:
-        raise HTTPException(
-            status_code=503,
-            detail="Equipment Service unavailable.",
-        )
-    except httpx.HTTPStatusError:
-        raise HTTPException(
-            status_code=502,
-            detail="Equipment Service returned an error.",
-        )
-
-    if equipment is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Equipment {item.equipment_id} not found.",
-        )
-
     with db() as conn:
-        # Serialize loan creation writes in SQLite.
+        # Serialize loan creation and deletion coordination.
         conn.execute("BEGIN IMMEDIATE")
 
+        # Block borrowing while equipment deletion is pending.
+        guard = conn.execute(
+            """
+            SELECT status
+            FROM equipment_deletion_guards
+            WHERE equipment_id=?
+            """,
+            (item.equipment_id,),
+        ).fetchone()
+
+        if guard is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Equipment is unavailable because "
+                    "deletion is pending or completed."
+                ),
+            )
+
+        # Check equipment while holding the transaction lock.
+        try:
+            equipment = get_equipment(item.equipment_id)
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Equipment Service unavailable.",
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Equipment Service returned an error.",
+            ) from exc
+
+        if equipment is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Equipment {item.equipment_id} not found.",
+            )
+
+        # Preserve the original inclusive overlap rule.
         if overlap_exists(
             conn,
             item.equipment_id,
@@ -116,12 +138,19 @@ def create_loan(item: LoanCreate):
         ):
             raise HTTPException(
                 status_code=409,
-                detail="Loan conflicts with an existing active loan.",
+                detail=(
+                    "Loan conflicts with an existing "
+                    "active loan."
+                ),
             )
 
         cursor = conn.execute(
             """
-            INSERT INTO loans(equipment_id, start_date, end_date)
+            INSERT INTO loans(
+                equipment_id,
+                start_date,
+                end_date
+            )
             VALUES (?, ?, ?)
             """,
             (
@@ -131,12 +160,12 @@ def create_loan(item: LoanCreate):
             ),
         )
 
-        return dict(
-            conn.execute(
-                "SELECT * FROM loans WHERE id=?",
-                (cursor.lastrowid,),
-            ).fetchone()
-        )
+        created = conn.execute(
+            "SELECT * FROM loans WHERE id=?",
+            (cursor.lastrowid,),
+        ).fetchone()
+
+        return dict(created)
 
 
 @app.patch("/loans/{loan_id}")

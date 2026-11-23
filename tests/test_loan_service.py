@@ -199,3 +199,28 @@ def test_adjacent_date_overlap_rejected(client):
     )
 
     assert response.status_code == 409
+
+def test_loan_rejected_during_equipment_deletion(client):
+    from services.loan_service.database import db
+
+    # Simulate a deletion already in progress.
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO equipment_deletion_guards(
+                equipment_id,
+                status
+            )
+            VALUES (?, ?)
+            """,
+            (1, "pending"),
+        )
+
+    response = create_test_loan(client)
+
+    assert response.status_code == 409
+    assert "deletion" in response.json()["detail"].lower()
+
+    # No loan must be created.
+    loans = client.get("/loans").json()
+    assert loans == []
