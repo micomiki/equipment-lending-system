@@ -1,0 +1,15 @@
+services:
+  web:
+    build: .
+    container_name: equipment-lending
+    ports:
+      - "8000:8000"
+    environment:
+      LENDING_DB: /data/lending.db
+    volumes:
+      - equipment-lending-data:/data
+    restart: unless-stopped
+
+volumes:
+  equipment-lending-data:
+    name: equipment-lending-data
