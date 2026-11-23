@@ -1,45 +1,61 @@
-workflow:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_PIPELINE_SOURCE == "push"'
 
 stages:
   - test
   - quality
   - build
 
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
 default:
   tags:
     - windows-local
+
+# -------------------------
+# Stage 1: Unit Tests
+# -------------------------
 
 unit_tests:
   stage: test
   script:
     - py -3.13 -m pip install -r requirements.txt -r requirements-dev.txt
-    - py -3.13 -m pytest -q
+    - py -3.13 -m pip install pytest httpx
+    - py -3.13 -m pytest -v tests/test_web_frontend.py tests/test_equipment_service.py tests/test_loan_service.py
+
+# -------------------------
+# Stage 2: Code Quality
+# -------------------------
 
 code_quality:
   stage: quality
   script:
     - py -3.13 -m pip install ruff
-    - py -3.13 -m ruff check lending.py clients/ services/ tests/
+    - py -3.13 -m ruff check web/ clients/ services/ tests/
 
 compose_validation:
   stage: quality
   script:
     - docker compose config --quiet
 
+# -------------------------
+# Stage 3: Docker Builds
+# -------------------------
+
 build_web:
   stage: build
   script:
-    - docker build --file Dockerfile --tag equipment-lending-web:ci .
+    - docker build -f Dockerfile -t equipment-lending-web:ci .
 
 build_equipment:
   stage: build
   script:
-    - docker build --file services/equipment_service/Dockerfile --tag equipment-lending-equipment:ci .
+    - docker build -f services/equipment_service/Dockerfile -t equipment-lending-equipment:ci .
 
 build_loan:
   stage: build
   script:
-    - docker build --file services/loan_service/Dockerfile --tag equipment-lending-loan:ci .
+    - docker build -f services/loan_service/Dockerfile -t equipment-lending-loan:ci .
