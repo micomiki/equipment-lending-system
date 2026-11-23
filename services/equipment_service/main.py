@@ -27,13 +27,23 @@ def health():
 
 @app.get("/equipment")
 def list_equipment():
-    return rows("SELECT * FROM equipment ORDER BY id")
-
+    return rows(
+        """
+        SELECT id, name, description
+        FROM equipment
+        WHERE status='active'
+        ORDER BY id
+        """
+    )
 
 @app.get("/equipment/{equipment_id}")
 def get_equipment(equipment_id: int):
     result = rows(
-        "SELECT * FROM equipment WHERE id=?",
+        """
+        SELECT id, name, description
+        FROM equipment
+        WHERE id=? AND status='active'
+        """,
         (equipment_id,),
     )
 

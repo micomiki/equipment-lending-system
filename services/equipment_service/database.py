@@ -28,15 +28,34 @@ def db():
         conn.close()
 
 
+
 def init_db():
     with db() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS equipment (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT ''
+                description TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active'
+                    CHECK(status IN ('active', 'deleted'))
             )
         """)
+
+        # Migrate databases created before the status column existed.
+        columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(equipment)"
+            ).fetchall()
+        }
+
+        if "status" not in columns:
+            conn.execute("""
+                ALTER TABLE equipment
+                ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+                    CHECK(status IN ('active', 'deleted'))
+            """)
+
 
 
 def rows(sql, params=()):
