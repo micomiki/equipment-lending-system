@@ -19,14 +19,39 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
-from clients.loan_client import list_loans as service_list_loans
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from clients.equipment_client import get_equipment
+from clients.equipment_client import (
+    create_equipment as service_create_equipment,
+)
+from clients.equipment_client import (
+    get_equipment,
+)
+from clients.equipment_client import (
+    list_equipment as service_list_equipment,
+)
+from clients.equipment_client import (
+    update_equipment as service_update_equipment,
+)
+from clients.loan_client import (
+    cancel_loan as service_cancel_loan,
+)
+from clients.loan_client import (
+    create_loan as service_create_loan,
+)
+from clients.loan_client import (
+    get_loan as service_get_loan,
+)
+from clients.loan_client import (
+    list_loans as service_list_loans,
+)
+from clients.loan_client import (
+    update_loan as service_update_loan,
+)
 
 DB_PATH = os.environ.get("LENDING_DB", "lending.db")
 @asynccontextmanager
@@ -269,6 +294,88 @@ app.mount(
 )
 
 
+# Preserve the original SQLite/CLI behavior unless explicitly enabled for the UI.
+WEB_USE_MICROSERVICES = os.getenv("WEB_USE_MICROSERVICES", "0") == "1"
+
+
+class ServiceFormError(ValueError):
+    """An error reported by a remote service, safe to show in a form."""
+
+
+def _remote(call, *args, **kwargs):
+    try:
+        return call(*args, **kwargs)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail="Microservice unavailable") from exc
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in (400, 404, 409, 422):
+            try:
+                detail = exc.response.json().get("detail", "Request rejected")
+            except ValueError:
+                detail = "Request rejected"
+            if isinstance(detail, list):
+                detail = "Invalid form data"
+            raise ServiceFormError(str(detail)) from exc
+        raise HTTPException(status_code=502, detail="Microservice error") from exc
+
+
+def _equipment_items():
+    if WEB_USE_MICROSERVICES:
+        return _remote(service_list_equipment)
+    return rows("SELECT * FROM equipment ORDER BY id")
+
+
+def _loan_items():
+    if not WEB_USE_MICROSERVICES:
+        return rows(
+            """SELECT l.*, e.name AS equipment_name FROM loans l
+               JOIN equipment e ON e.id=l.equipment_id ORDER BY l.id DESC"""
+        )
+    equipment = {e["id"]: e["name"] for e in _equipment_items()}
+    loans = _remote(service_list_loans)
+    return [
+        {**loan, "equipment_name": equipment.get(loan["equipment_id"], "Unknown equipment")}
+        for loan in sorted(loans, key=lambda loan: loan["id"], reverse=True)
+    ]
+
+
+def _equipment_by_id(equipment_id):
+    if WEB_USE_MICROSERVICES:
+        return _remote(get_equipment, equipment_id)
+    found = rows("SELECT * FROM equipment WHERE id=?", (equipment_id,))
+    return found[0] if found else None
+
+
+def _loan_by_id(loan_id):
+    if WEB_USE_MICROSERVICES:
+        loan = _remote(service_get_loan, loan_id)
+        if loan is not None:
+            equipment = _equipment_by_id(loan["equipment_id"])
+            return {**loan, "equipment_name": equipment["name"] if equipment else "Unknown equipment"}
+        return None
+    found = rows(
+        """SELECT l.*, e.name AS equipment_name FROM loans l
+           JOIN equipment e ON e.id=l.equipment_id WHERE l.id=?""",
+        (loan_id,),
+    )
+    return found[0] if found else None
+
+
+def _available_equipment(start, end):
+    valid_dates(start, end)
+    if not WEB_USE_MICROSERVICES:
+        return search_equipment(start, end)
+    equipment = _equipment_items()
+    loans = _remote(service_list_loans)
+    blocked = {
+        loan["equipment_id"] for loan in loans
+        if loan["status"] == "active"
+        and loan["start_date"] <= end and loan["end_date"] >= start
+    }
+    return [item for item in equipment if item["id"] not in blocked]
+
+
 def _ui_redirect(path: str, message: str, level: str = "success"):
     """Redirect after a successful or failed form submission."""
     separator = "&" if "?" in path else "?"
@@ -292,12 +399,8 @@ def web_home(
     message: str | None = None,
     level: str = "success",
 ):
-    equipment_items = rows("SELECT * FROM equipment ORDER BY id")
-    loan_items = rows(
-        """SELECT l.*, e.name AS equipment_name
-           FROM loans l JOIN equipment e ON e.id=l.equipment_id
-           ORDER BY l.id DESC"""
-    )
+    equipment_items = _equipment_items()
+    loan_items = _loan_items()
     active_loans = [loan for loan in loan_items if loan["status"] == "active"]
     return _render(
         request,
@@ -325,7 +428,7 @@ def web_equipment(
         "equipment.html",
         {
             "request": request,
-            "equipment_items": rows("SELECT * FROM equipment ORDER BY id"),
+            "equipment_items": _equipment_items(),
             "message": message,
             "level": level,
         },
@@ -356,7 +459,10 @@ async def web_equipment_create(request: Request):
     name = str(form.get("name", ""))
     description = str(form.get("description", ""))
     try:
-        add_equipment(name, description)
+        if WEB_USE_MICROSERVICES:
+            _remote(service_create_equipment, name, description)
+        else:
+            add_equipment(name, description)
         return _ui_redirect("/ui/equipment", "Equipment added successfully.")
     except ValueError as exc:
         return _render(
@@ -378,17 +484,17 @@ async def web_equipment_create(request: Request):
     include_in_schema=False,
 )
 def web_equipment_edit(request: Request, equipment_id: int):
-    found = rows("SELECT * FROM equipment WHERE id=?", (equipment_id,))
-    if not found:
+    equipment = _equipment_by_id(equipment_id)
+    if equipment is None:
         return _ui_redirect("/ui/equipment", f"Equipment {equipment_id} not found.", "error")
     return _render(
         request,
         "equipment_form.html",
         {
             "request": request,
-            "equipment": found[0],
+            "equipment": equipment,
             "error": None,
-            "values": found[0],
+            "values": equipment,
         },
     )
 
@@ -415,16 +521,19 @@ async def web_equipment_update(request: Request, equipment_id: int):
     name = str(form.get("name", ""))
     description = str(form.get("description", ""))
     try:
-        update_equipment(equipment_id, name=name, description=description)
+        if WEB_USE_MICROSERVICES:
+            _remote(service_update_equipment, equipment_id, name=name, description=description)
+        else:
+            update_equipment(equipment_id, name=name, description=description)
         return _ui_redirect("/ui/equipment", "Equipment updated successfully.")
     except ValueError as exc:
-        found = rows("SELECT * FROM equipment WHERE id=?", (equipment_id,))
+        equipment = _equipment_by_id(equipment_id)
         return _render(
             request,
             "equipment_form.html",
             {
                 "request": request,
-                "equipment": found[0] if found else {"id": equipment_id},
+                "equipment": equipment if equipment else {"id": equipment_id},
                 "error": str(exc),
                 "values": {"name": name, "description": description},
             },
@@ -435,6 +544,13 @@ async def web_equipment_update(request: Request, equipment_id: int):
 @app.post("/ui/equipment/{equipment_id}/delete", include_in_schema=False)
 def web_equipment_delete(equipment_id: int):
     try:
+        if WEB_USE_MICROSERVICES:
+            # Never delete through a check-then-delete cross-service race.
+            return _ui_redirect(
+                "/ui/equipment",
+                "Deletion is disabled in microservice mode until atomic loan protection is implemented.",
+                "error",
+            )
         remove_equipment(equipment_id)
         return _ui_redirect("/ui/equipment", "Equipment removed successfully.")
     except ValueError as exc:
@@ -447,11 +563,7 @@ def web_loans(
     message: str | None = None,
     level: str = "success",
 ):
-    loan_items = rows(
-        """SELECT l.*, e.name AS equipment_name
-           FROM loans l JOIN equipment e ON e.id=l.equipment_id
-           ORDER BY l.id DESC"""
-    )
+    loan_items = _loan_items()
     return _render(
         request,
         "loans.html",
@@ -472,7 +584,7 @@ def web_loan_new(request: Request):
         {
             "request": request,
             "loan": None,
-            "equipment_items": rows("SELECT * FROM equipment ORDER BY name"),
+            "equipment_items": sorted(_equipment_items(), key=lambda e: e["name"]),
             "error": None,
             "values": {"equipment_id": "", "start_date": "", "end_date": ""},
         },
@@ -492,7 +604,10 @@ async def web_loan_create(request: Request):
     }
     try:
         equipment_id = int(equipment_value)
-        create_loan(equipment_id, start, end)
+        if WEB_USE_MICROSERVICES:
+            _remote(service_create_loan, equipment_id, start, end)
+        else:
+            create_loan(equipment_id, start, end)
         return _ui_redirect("/ui/loans", "Loan created successfully.")
     except (ValueError, TypeError) as exc:
         message = str(exc) or "Select a valid equipment item."
@@ -502,7 +617,7 @@ async def web_loan_create(request: Request):
             {
                 "request": request,
                 "loan": None,
-                "equipment_items": rows("SELECT * FROM equipment ORDER BY name"),
+                "equipment_items": sorted(_equipment_items(), key=lambda e: e["name"]),
                 "error": message,
                 "values": values,
             },
@@ -516,22 +631,16 @@ async def web_loan_create(request: Request):
     include_in_schema=False,
 )
 def web_loan_edit(request: Request, loan_id: int):
-    found = rows(
-        """SELECT l.*, e.name AS equipment_name
-           FROM loans l JOIN equipment e ON e.id=l.equipment_id
-           WHERE l.id=?""",
-        (loan_id,),
-    )
-    if not found:
+    loan = _loan_by_id(loan_id)
+    if loan is None:
         return _ui_redirect("/ui/loans", f"Loan {loan_id} not found.", "error")
-    loan = found[0]
     return _render(
         request,
         "loan_form.html",
         {
             "request": request,
             "loan": loan,
-            "equipment_items": rows("SELECT * FROM equipment ORDER BY name"),
+            "equipment_items": sorted(_equipment_items(), key=lambda e: e["name"]),
             "error": None,
             "values": {
                 "equipment_id": str(loan["equipment_id"]),
@@ -548,25 +657,23 @@ async def web_loan_update(request: Request, loan_id: int):
     start = str(form.get("start_date", ""))
     end = str(form.get("end_date", ""))
     try:
-        change_loan(loan_id, start=start, end=end)
+        if WEB_USE_MICROSERVICES:
+            _remote(service_update_loan, loan_id, start_date=start, end_date=end)
+        else:
+            change_loan(loan_id, start=start, end=end)
         return _ui_redirect("/ui/loans", "Loan dates updated successfully.")
     except ValueError as exc:
-        found = rows(
-            """SELECT l.*, e.name AS equipment_name
-               FROM loans l JOIN equipment e ON e.id=l.equipment_id
-               WHERE l.id=?""",
-            (loan_id,),
-        )
+        loan = _loan_by_id(loan_id)
         return _render(
             request,
             "loan_form.html",
             {
                 "request": request,
-                "loan": found[0] if found else {"id": loan_id},
-                "equipment_items": rows("SELECT * FROM equipment ORDER BY name"),
+                "loan": loan if loan else {"id": loan_id},
+                "equipment_items": sorted(_equipment_items(), key=lambda e: e["name"]),
                 "error": str(exc),
                 "values": {
-                    "equipment_id": str(found[0]["equipment_id"]) if found else "",
+                    "equipment_id": str(loan["equipment_id"]) if loan else "",
                     "start_date": start,
                     "end_date": end,
                 },
@@ -578,7 +685,10 @@ async def web_loan_update(request: Request, loan_id: int):
 @app.post("/ui/loans/{loan_id}/cancel", include_in_schema=False)
 def web_loan_cancel(loan_id: int):
     try:
-        cancel_loan(loan_id)
+        if WEB_USE_MICROSERVICES:
+            _remote(service_cancel_loan, loan_id)
+        else:
+            cancel_loan(loan_id)
         return _ui_redirect("/ui/loans", "Loan cancelled successfully.")
     except ValueError as exc:
         return _ui_redirect("/ui/loans", str(exc), "error")
@@ -596,7 +706,7 @@ def web_availability(
         try:
             if not start_date or not end_date:
                 raise ValueError("Enter both a start date and an end date.")
-            available_items = search_equipment(start_date, end_date)
+            available_items = _available_equipment(start_date, end_date)
         except ValueError as exc:
             error = str(exc)
     return _render(

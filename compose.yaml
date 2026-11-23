@@ -1,15 +1,69 @@
+
 services:
   web:
-    build: .
-    container_name: equipment-lending
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
       LENDING_DB: /data/lending.db
+      EQUIPMENT_SERVICE_URL: http://equipment:8001
+      LOAN_SERVICE_URL: http://loan:8002
+      WEB_USE_MICROSERVICES: "1"
     volumes:
-      - equipment-lending-data:/data
-    restart: unless-stopped
+      - web_data:/data
+    depends_on:
+      equipment:
+        condition: service_healthy
+      loan:
+        condition: service_healthy
+
+  equipment:
+    build:
+      context: .
+      dockerfile: services/equipment_service/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      EQUIPMENT_DB: /data/equipment.db
+    volumes:
+      - equipment_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  loan:
+    build:
+      context: .
+      dockerfile: services/loan_service/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      LOAN_DB: /data/loans.db
+      EQUIPMENT_SERVICE_URL: http://equipment:8001
+    volumes:
+      - loan_data:/data
+    depends_on:
+      equipment:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
-  equipment-lending-data:
-    name: equipment-lending-data
+  web_data:
+  equipment_data:
+  loan_data:
