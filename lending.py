@@ -18,11 +18,15 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlencode
 
+import httpx
+from clients.loan_client import list_loans as service_list_loans
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+
+from clients.equipment_client import get_equipment
 
 DB_PATH = os.environ.get("LENDING_DB", "lending.db")
 @asynccontextmanager
@@ -388,7 +392,23 @@ def web_equipment_edit(request: Request, equipment_id: int):
         },
     )
 
+@app.get("/microservices/loans")
+def microservice_loans():
+    try:
+        return service_list_loans()
 
+    except httpx.RequestError:
+        raise HTTPException(
+            status_code=503,
+            detail="Loan Microservice unavailable",
+        )
+
+    except httpx.HTTPStatusError:
+        raise HTTPException(
+            status_code=502,
+            detail="Loan Microservice returned an error",
+        )
+    
 @app.post("/ui/equipment/{equipment_id}/update", include_in_schema=False)
 async def web_equipment_update(request: Request, equipment_id: int):
     form = await request.form()
@@ -591,6 +611,28 @@ def web_availability(
         },
     )
 
+@app.get("/microservices/equipment/{equipment_id}")
+def microservice_equipment(equipment_id: int):
+    try:
+        equipment = get_equipment(equipment_id)
+    except httpx.RequestError:
+        raise HTTPException(
+            status_code=503,
+            detail="Equipment Service unavailable",
+        )
+    except httpx.HTTPStatusError:
+        raise HTTPException(
+            status_code=502,
+            detail="Equipment Service returned an error",
+        )
+
+    if equipment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Equipment not found",
+        )
+
+    return equipment
 
 def print_items(items):
     if not items:
