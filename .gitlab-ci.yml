@@ -1,45 +1,61 @@
-workflow:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
-      when: never
-    - if: '$CI_PIPELINE_SOURCE == "push"'
+
 stages:
   - test
   - quality
   - build
 
-unit_tests:
-  stage: test
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+default:
   tags:
     - windows-local
+
+# -------------------------
+# Stage 1: Unit Tests
+# -------------------------
+
+unit_tests:
+  stage: test
   script:
-    - py -3.13 -m venv .ci-venv
-    - .\.ci-venv\Scripts\python.exe -m pip install -r requirements.txt
-    - .\.ci-venv\Scripts\python.exe -m pip install pytest httpx
-    - .\.ci-venv\Scripts\python.exe -m pytest -v --junitxml=pytest-report.xml
-  artifacts:
-    when: always
-    reports:
-      junit: pytest-report.xml
-    paths:
-      - pytest-report.xml
+    - py -3.13 -m pip install -r requirements.txt -r requirements-dev.txt
+    - py -3.13 -m pip install pytest httpx
+    - py -3.13 -m pytest -v tests/test_web_frontend.py tests/test_equipment_service.py tests/test_loan_service.py
+
+# -------------------------
+# Stage 2: Code Quality
+# -------------------------
 
 code_quality:
   stage: quality
-  tags:
-    - windows-local
   script:
-    - py -3.13 -m venv .ci-venv
-    - .\.ci-venv\Scripts\python.exe -m pip install ruff
-    - .\.ci-venv\Scripts\python.exe -m ruff check lending.py tests/
-  needs: []
+    - py -3.13 -m pip install ruff
+    - py -3.13 -m ruff check web/ clients/ services/ tests/
 
-docker_build:
-  stage: build
-  tags:
-    - windows-local 
+compose_validation:
+  stage: quality
   script:
-    - docker info
-    - docker build -t equipment-lending:$env:CI_COMMIT_SHORT_SHA .
-  needs: []
+    - docker compose config --quiet
+
+# -------------------------
+# Stage 3: Docker Builds
+# -------------------------
+
+build_web:
+  stage: build
+  script:
+    - docker build -f Dockerfile -t equipment-lending-web:ci .
+
+build_equipment:
+  stage: build
+  script:
+    - docker build -f services/equipment_service/Dockerfile -t equipment-lending-equipment:ci .
+
+build_loan:
+  stage: build
+  script:
+    - docker build -f services/loan_service/Dockerfile -t equipment-lending-loan:ci .

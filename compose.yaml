@@ -1,15 +1,113 @@
+
 services:
   web:
-    build: .
-    container_name: equipment-lending
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
-      LENDING_DB: /data/lending.db
-    volumes:
-      - equipment-lending-data:/data
-    restart: unless-stopped
+      EQUIPMENT_SERVICE_URL: http://gateway:8080
+      LOAN_SERVICE_URL: http://gateway:8080
+    depends_on:
+      gateway:
+        condition: service_started
 
+  gateway:
+    image: nginx:alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      equipment:
+        condition: service_healthy
+      loan:
+        condition: service_healthy
+
+  equipment:
+    build:
+      context: .
+      dockerfile: services/equipment_service/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      EQUIPMENT_DB: /data/lending_shared.db
+      RABBITMQ_URL: amqp://lending:lending_dev_password@rabbitmq:5672/%2F
+    volumes:
+      - shared_data:/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy  
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  loan:
+    build:
+      context: .
+      dockerfile: services/loan_service/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      LOAN_DB: /data/lending_shared.db
+      EQUIPMENT_SERVICE_URL: http://equipment:8001
+    volumes:
+      - shared_data:/data
+    depends_on:
+      equipment:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: lending
+      RABBITMQ_DEFAULT_PASS: lending_dev_password
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test:
+        - CMD
+        - rabbitmq-diagnostics
+        - -q
+        - ping
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  loan_consumer:
+    build:
+      context: .
+      dockerfile: services/loan_service/Dockerfile
+    command: python -m messaging.consumer
+    environment:
+      LOAN_DB: /data/lending_shared.db
+      RABBITMQ_URL: amqp://lending:lending_dev_password@rabbitmq:5672/%2F
+    volumes:
+      - shared_data:/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
 volumes:
-  equipment-lending-data:
-    name: equipment-lending-data
+  shared_data:
+  rabbitmq_data:
