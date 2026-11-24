@@ -34,7 +34,7 @@ code_quality:
   stage: quality
   script:
     - py -3.13 -m pip install ruff
-    - py -3.13 -m ruff check web/ clients/ services/ tests/
+    - py -3.13 -m ruff check web/ clients/ services/ messaging/ tests/
 
 compose_validation:
   stage: quality
